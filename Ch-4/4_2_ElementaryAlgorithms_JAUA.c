@@ -89,22 +89,11 @@ int main(){
     int i;   // Iterative variable
 
     // Trepezoid method is roubust specilally for not so smooth integrands
-    struct integrate t;
-    struct integrate c;
-    struct integrate s;
-  
+    struct integrate t;  
 
     t.x_left = 0.0;
     t.x_right = 1.0;
     t.integrand = f;
-
-    c.x_left = 0.0;
-    c.x_right = 1.0;
-    c.integrand = f;
-
-    s.x_left = 0.0;
-    s.x_right = 1.0;
-    s.integrand = f;
 
 // Integration with a predifined number of iterations. Not convergence guaranteed
     printf("Fixed iterations:\n");
@@ -114,15 +103,26 @@ int main(){
         trapzoid( &t );
     }
 
+// We can reboot the pointer by forcing the sum and step to zero
 // Integration with a given toleance a a maximum number of steps
+
+    t.n_step = 0;
+    t.sum = 0;
+
     printf("\nTOL = %.2e, JMAX = %d\n", TOL, JMAX);
-    trapzoid_tol( &c );
-    printf("\tIteration n = %d -> %.10f\n", c.n_step, c.sum );
+    trapzoid_tol( &t );
+    printf("\tIteration n = %d -> %.10f\n", t.n_step, t.sum );
 
 // Integration with Simpson
+// In general it is most efficient since we need less evaluations. Useful for
+// functions with  a finith 4th derivative.
+
+    t.n_step = 0;
+    t.sum = 0;
+
     printf("\nSimpson\nTOL = %.2e, JMAX = %d\n", TOL, JMAX);
-    simpson_tol( &s );
-    printf("\tIteration n = %d -> %.10f\n", s.n_step, s.sum );
+    simpson_tol( &t );
+    printf("\tIteration n = %d -> %.10f\n", t.n_step, t.sum );
 
     return 0;
 }
