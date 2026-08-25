@@ -1,4 +1,8 @@
 #include<stdio.h>
+#include<math.h> // abs function
+
+#define TOL 1.0e-5
+#define JMAX 20
 
 //  f: R -> R 
 float f( float x){
@@ -42,19 +46,83 @@ void trapzoid( struct integrate *t){
 
 }
 
-int main(){
-    int i;
+/* Routine with a tolerance to stop the calculations */
+void trapzoid_tol(struct integrate *t){
+    int j;
+    float old = 0.0;    // previous step
 
+    for(j=0; j <= JMAX; j++){
+        trapzoid( &(*t) );      // Performing 1 level of integration in the grid
+        if( j >= 4 ){           // Forcing at least five iterations
+            if( fabs( (*t).sum - old ) < TOL*fabs(old) || ((*t).sum == 0.0 && old == 0.0)){ // Checking convergence
+                return ;        // Void functions cannot return any value, thus this is how we exit the function
+            }
+        }
+        old = (*t).sum;
+    }
+    printf("Too many steps in routine trapzoid_tol");
+}
+
+/* Simpson with a tolerance to stop the calculations */
+void simpson_tol(struct integrate *t){
+
+    float old_t = 0.0;    // previous step of trapeziod
+    float old_s = 0.0;    // previous step of Simpson 
+    float j, simp;        //  iterator, Simpson 
+
+    for(j=0; j <= JMAX; j++){
+        trapzoid( &(*t) );      // Performing 1 level of integration in the grid
+        simp =  (4. * (*t).sum - old_t) / 3.;
+        if( j >= 4 ){           // Forcing at least five iterations
+            if( fabs( simp - old_s ) < TOL*fabs(old_s) || (simp == 0.0 && old_s == 0.0)){ // Checking convergence
+                (*t).sum = simp;
+                return ;        // Void functions cannot return any value, thus this is how we exit the function
+            }
+        }
+        old_s = simp;
+        old_t = (*t).sum;
+    }
+    printf("Too many steps in routine simpson_tol");
+}
+
+int main(){
+    int i;   // Iterative variable
+
+    // Trepezoid method is roubust specilally for not so smooth integrands
     struct integrate t;
+    struct integrate c;
+    struct integrate s;
+  
+
     t.x_left = 0.0;
     t.x_right = 1.0;
     t.integrand = f;
 
+    c.x_left = 0.0;
+    c.x_right = 1.0;
+    c.integrand = f;
 
+    s.x_left = 0.0;
+    s.x_right = 1.0;
+    s.integrand = f;
 
-    for(i = 1; i <= 10; i++ ){
-        printf("Iteration n = %d -> %.10f\n", t.n_step, t.sum );
+// Integration with a predifined number of iterations. Not convergence guaranteed
+    printf("Fixed iterations:\n");
+
+    for(i = 1; i <= 5; i++ ){
+        printf("\tIteration n = %d -> %.10f\n", t.n_step, t.sum );
         trapzoid( &t );
     }
+
+// Integration with a given toleance a a maximum number of steps
+    printf("\nTOL = %.2e, JMAX = %d\n", TOL, JMAX);
+    trapzoid_tol( &c );
+    printf("\tIteration n = %d -> %.10f\n", c.n_step, c.sum );
+
+// Integration with Simpson
+    printf("\nSimpson\nTOL = %.2e, JMAX = %d\n", TOL, JMAX);
+    simpson_tol( &s );
+    printf("\tIteration n = %d -> %.10f\n", s.n_step, s.sum );
+
     return 0;
 }
