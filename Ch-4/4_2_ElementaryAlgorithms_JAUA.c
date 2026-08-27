@@ -1,12 +1,90 @@
 #include<stdio.h>
+#include <stdlib.h> // For the memory allocation
 #include<math.h> // fabs (float absolute) function
 
+// Parameters for the integration convergence
 #define TOL 1.0e-5
 #define JMAX 20
 
 //  f: R -> R 
+//  function to integraete
 float f( float x){
     return x * x;
+}
+
+float g( float x){
+    return pow(x,4) * log(x + sqrt( x * x + 1));
+}
+
+// Neville methodd to interpolate (Lagrange?)
+void polint(const double xa[], const double ya[], int n, double x, double *y, double *dy) {
+    int i, m, ns = 0;       // index variables
+                            // i -> find interval where the desired value x is located
+                            // ns -> Index of the lower side of the desired interval. OptimiZes the calculatio to aviud not needed lower values
+                            // m -> run over the table to calculate the desired polynomials.
+                            //      i -> iruns over aech value of m
+                            // 
+    double den, dif, dift, ho, hp, w;
+
+    /* Allocate working arrays for differences */
+    double *c = (double *)malloc((size_t)n * sizeof(double));
+    double *d = (double *)malloc((size_t)n * sizeof(double));
+
+    if (c == NULL || d == NULL) {
+        fprintf(stderr, "Allocation failure in polint\n");
+        free(c);
+        free(d);
+        return;
+    }
+
+    /* Find the index of the closest table entry */
+    dif = fabs(x - xa[0]);
+    for (i = 0; i < n; i++) {
+        if ((dift = fabs(x - xa[i])) < dif) {
+            ns = i;
+            dif = dift;
+        }
+        /* Initialize the C and D working arrays 
+            Coefficints relain the value ya evaluated at xa
+        */
+        c[i] = ya[i];
+        d[i] = ya[i];
+    }
+
+    /* Initial approximation to y */
+    *y = ya[ns--];
+
+    /* For each column of the tableau, loop over current c's and d's */
+    for (m = 1; m < n; m++) {
+        for (i = 0; i < n - m; i++) {
+            ho = xa[i] - x;
+            hp = xa[i + m] - x;
+            w = c[i + 1] - d[i];
+
+            den = ho - hp;
+            if (den == 0.0) { // Avoid division by zero
+                fprintf(stderr, "Error in routine polint: two xa elements are equal!\n");
+                free(c);
+                free(d);
+                return;
+            }
+            den = w / den;
+
+            /* Update C and D */
+            d[i] = hp * den;
+            c[i] = ho * den;
+        }
+
+        /* 
+         * Decide which correction (c or d) to add to y based on traversing
+         * the straightest path through the tableau.
+         */
+        *dy = (2 * (ns + 1) < (n - m)) ? c[ns + 1] : d[ns--];
+        *y += *dy;
+    }
+
+    free(c);
+    free(d);
 }
 
 /* C structures are like list's whose element can be of diferent data-tyepes.
@@ -67,7 +145,8 @@ void simpson_tol(struct integrate *t){
 
     float old_t = 0.0;    // previous step of trapeziod
     float old_s = 0.0;    // previous step of Simpson 
-    float j, simp;        //  iterator, Simpson 
+    float simp;        //  iterator, Simpson 
+    int j;
 
     for(j=0; j <= JMAX; j++){
         trapzoid( &(*t) );      // Performing 1 level of integration in the grid
@@ -83,6 +162,35 @@ void simpson_tol(struct integrate *t){
     }
     printf("Too many steps in routine simpson_tol");
 }
+
+/* Romberg with a tolerance to stop the calculations */
+void romberg_tol(struct integrate *t){
+
+    const int JMAXP = JMAX + 1;
+    const int K = 5;    // Romberg parameters (K = 2 is Simpson)
+                        // Number of points used in the extrapolation
+    double s[JMAXP], h[JMAXP]; // Suscesive trapezoidal approximations and relative stepsizes
+    double ss, dss;  // ss -> Value of the interpolation of the trapezozid
+                    // dss -> error on the interpolation
+    int j;        //  iterator 
+
+    h[0] = 1.0; 
+    for(j=0; j <= JMAX; j++){
+        trapzoid( &(*t) );      // Performing 1 level of integration in the grid
+        s[j] = t-> sum; 
+        if( j >= K ){           // Forcing at leat K integrations
+            polint( &h[j-K], &s[j-K], K, 0.0, &ss, &dss); // Interpolation
+            if (fabs(dss) <= TOL * fabs(ss)){
+                t -> sum = ss;
+                return;
+            }
+        }
+        h[j+1] = 0.25 * h[j];
+        }
+    printf("Too many steps in routine simpson_tol");
+}
+
+
 
 int main(){
     int i;   // Iterative variable
@@ -122,6 +230,30 @@ int main(){
     printf("\nSimpson\nTOL = %.2e, JMAX = %d\n", TOL, JMAX);
     simpson_tol( &t );
     printf("\tIteration n = %d -> %.10f\n", t.n_step, t.sum );
+
+
+// Complicated itegral
+    t.x_left = 0.0;
+    t.x_right = 2.0;
+    t.integrand = g;
+    t.n_step = 0;
+    t.sum = 0;
+
+    printf("\nChecking the complicated integral:\n");
+    trapzoid_tol( &t );
+    printf("\tIteration n = %d -> %.10f\n", t.n_step, t.sum );
+
+    t.n_step = 0;
+    t.sum = 0;
+    simpson_tol( &t );
+    printf("\tIteration n = %d -> %.10f\n", t.n_step, t.sum );
+    
+    t.n_step = 0;
+    t.sum = 0;
+    romberg_tol( &t );
+    printf("\tIteration n = %d -> %.10f\n", t.n_step, t.sum );
+    
+    
 
     return 0;
 }

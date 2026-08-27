@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include <stdlib.h>
+#include <stdlib.h> // For the memory allocation
 #include <math.h>
 
 // De chat GPT sin depender del header nrutil.h
@@ -97,7 +97,7 @@ void polint(const double xa[], const double ya[], int n, double x, double *y, do
 
 int main() {
     /* Sample data points: y = x^2 */
-    double xa[] = {1.0, 2.0, 3.0, 4.0};
+    double xa[] = {1.0, 2.0, 3.0, 4.0}; 
     double ya[] = {1.0, 4.0, 9.0, 16.0};
     int n = sizeof(xa) / sizeof(xa[0]);
 
