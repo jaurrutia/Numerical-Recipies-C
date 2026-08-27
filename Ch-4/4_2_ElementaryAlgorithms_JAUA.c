@@ -1,5 +1,5 @@
 #include<stdio.h>
-#include<math.h> // abs function
+#include<math.h> // fabs (float absolute) function
 
 #define TOL 1.0e-5
 #define JMAX 20
@@ -11,8 +11,7 @@ float f( float x){
 
 /* C structures are like list's whose element can be of diferent data-tyepes.
  They cannot contain functions as elements, but they can be allocated with pointers. */
-struct integrate
-{
+struct integrate{
     int n_step;                // iteration step
     double x_left, x_right;    // interval borders x_left < x_right
     double sum;                // accumulated value of the integral
