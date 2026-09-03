@@ -1,6 +1,7 @@
 #include<stdio.h>
 #include <stdlib.h> // For the memory allocation
 #include<math.h> // fabs (float absolute) function
+#include <stddef.h> // typedef macros (to have parameters in functions as the kernels)
 
 // Parameters for the integration convergence
 #define TOL 1.0e-5
@@ -9,94 +10,41 @@
 //  f: R -> R 
 //  function to integraete
 float f( float x){
-    return x * x;
+    return 1. / (x * x);
 }
 
 
-// Neville methodd to interpolate (Lagrange?)
-void polint(const double xa[], const double ya[], int n, double x, double *y, double *dy) {
-    int i, m, ns = 0;       // index variables
-                            // i -> find interval where the desired value x is located
-                            // ns -> Index of the lower side of the desired interval. OptimiZes the calculatio to aviud not needed lower values
-                            // m -> run over the table to calculate the desired polynomials.
-                            //      i -> iruns over aech value of m
-                            // 
-    double den, dif, dift, ho, hp, w;
+// Implement the kernel change and the new variabels and limits automatically
+// f(x)
+typedef float (*IntegrandFunc)(float x, void *user_data);
+/* x -> t: transforms (t_left, t_right) and evaluates g(t)  */
+typedef float (*SubstitutionKernel)(float t, IntegrandFunc func, void *user_data);
 
-    /* Allocate working arrays for differences */
-    double *c = (double *)malloc((size_t)n * sizeof(double));
-    double *d = (double *)malloc((size_t)n * sizeof(double));
-
-    if (c == NULL || d == NULL) {
-        fprintf(stderr, "Allocation failure in polint\n");
-        free(c);
-        free(d);
-        return;
-    }
-
-    /* Find the index of the closest table entry */
-    dif = fabs(x - xa[0]);
-    for (i = 0; i < n; i++) {
-        if ((dift = fabs(x - xa[i])) < dif) {
-            ns = i;
-            dif = dift;
-        }
-        /* Initialize the C and D working arrays 
-            Coefficints relain the value ya evaluated at xa
-        */
-        c[i] = ya[i];
-        d[i] = ya[i];
-    }
-
-    /* Initial approximation to y */
-    *y = ya[ns--];
-
-    /* For each column of the tableau, loop over current c's and d's */
-    for (m = 1; m < n; m++) {
-        for (i = 0; i < n - m; i++) {
-            ho = xa[i] - x;
-            hp = xa[i + m] - x;
-            w = c[i + 1] - d[i];
-
-            den = ho - hp;
-            if (den == 0.0) { // Avoid division by zero
-                fprintf(stderr, "Error in routine polint: two xa elements are equal!\n");
-                free(c);
-                free(d);
-                return;
-            }
-            den = w / den;
-
-            /* Update C and D */
-            d[i] = hp * den;
-            c[i] = ho * den;
-        }
-
-        /* 
-         * Decide which correction (c or d) to add to y based on traversing
-         * the straightest path through the tableau.
-         */
-        *dy = (2 * (ns + 1) < (n - m)) ? c[ns + 1] : d[ns--];
-        *y += *dy;
-    }
-
-    free(c);
-    free(d);
-}
-
-
-
-/* C structures are like list's whose element can be of diferent data-tyepes.
- They cannot contain functions as elements, but they can be allocated with pointers. */
+// We change the integrate strcut we defined previuosly
 struct integrate{
     int n_step;                // iteration step
     double x_left, x_right;    // interval borders x_left < x_right
     double sum;                // accumulated value of the integral
 
-    float (*integrand)(float);
+    // 
+    IntegrandFunc integrand;   // float (*integrand)(float);
+    SubstitutionKernel kernel; // Variable transformation kernel (optional, NULL for standard) 
+    void *user_data
 };
 
-/* Routine implementing the extended trapezoidal rule which has a structure as argument */
+// We define different kernels 
+float kernel_identity(float t, IntegrandFunc func, void *user_data) { 
+    return func(t);  // x = t, dx = dt
+}
+
+float eval_step(struct integrate *t_struct, float x_eval) {  // Necesario para no usar wrappers y tener kernels genericos
+    if (t_struct->kernel != NULL) {
+        return t_struct->kernel(x_eval, t_struct->integrand, t_struct->user_data);
+    }
+    return t_struct->integrand(x_eval, t_struct->user_data);
+}
+
+/* Routine implementing the extended midpoint rule which has a structure as argument */
 void midpoint( struct integrate *t){
     float x, len, s, del, ddel;  // x: Evaluating point
                             // len: Number of grid points at current level
@@ -108,7 +56,8 @@ void midpoint( struct integrate *t){
                     // Increases the level for the partition grid when function is called
 
     if ( t -> n_step == 1){ // First evaluation: extrema values
-        (*t).sum = ((*t).x_right - (*t).x_left) * (*t).integrand( 0.5 * ( (*t).x_right + (*t).x_left)  ) ;
+        (*t).sum = ((*t).x_right - (*t).x_left) * eval_step( t, 0.5 * ( (*t).x_right + (*t).x_left)  );
+//     (*t).sum = ((*t).x_right - (*t).x_left) * (*t).integrand( 0.5 * ( (*t).x_right + (*t).x_left)  ) ;
     } else {
         for(it = 1, j = 1; j < (*t).n_step - 1 ; j++)   // Loop to build  the grid by increasing j
             it *= 3;                                   // Each time all it is calles, it increases a power of 2 with a bit-wise operation
@@ -118,9 +67,9 @@ void midpoint( struct integrate *t){
         x = (*t).x_left + 0.5 * del;                    // Starts the grid by shiftinf it from the x_left  point
         s = 0.0;
         for(j = 0; j < it; j++) {     // Evaluation of the funtion at the points of the current grid (Level)
-            s += (*t).integrand(x);
+            s += eval_step(t, x);
             x += ddel;
-            s += (*t).integrand(x);
+            s += eval_step(t, x);
             x += del;
         }
         (*t).sum = (*t).sum / 3.0 + del * s;          // adding values to our structure
@@ -145,58 +94,190 @@ void midpoint_tol(struct integrate *t){
     printf("Too many steps in routine trapzoid_tol");
 }
 
-/* Simpson with a tolerance to stop the calculations */
-void simp_midpoint_tol(struct integrate *t){
 
-    float old_t = 0.0;    // previous step of trapeziod
-    float old_s = 0.0;    // previous step of Simpson 
-    float simp;        //  iterator, Simpson 
-    int j;
-
-    for(j=0; j <= JMAX; j++){
-        midpoint( &(*t) );      // Performing 1 level of integration in the grid
-        simp =  (9. * (*t).sum - old_t) / 8.;
-        if( j >= 4 ){           // Forcing at least five iterations
-            if( fabs( simp - old_s ) < TOL*fabs(old_s) || (simp == 0.0 && old_s == 0.0)){ // Checking convergence
-                (*t).sum = simp;
-                return ;        // Void functions cannot return any value, thus this is how we exit the function
-            }
-        }
-        old_s = simp;
-        old_t = (*t).sum;
-    }
-    printf("Too many steps in routine simpson_tol");
+// infinite integrals
+float kernel_midinf(float t, IntegrandFunc func) {
+    return func(1. / t) / (t * t);    // f(1/t) / t^2
 }
 
-/* Romberg with a tolerance to stop the calculations */
-void romberg_tol(struct integrate *t){
+float integrate_infinite_upper(const struct integrate *original) {
+    struct integrate new_t = *original;
 
-    const int JMAXP = JMAX + 1;
-    const int K = 5;    // Romberg parameters (K = 2 is Simpson)
-                        // Number of points used in the extrapolation
-    double s[JMAXP], h[JMAXP]; // Suscesive trapezoidal approximations and relative stepsizes
-    double ss, dss;  // ss -> Value of the interpolation of the trapezozid
-                    // dss -> error on the interpolation
-    int j;        //  iterator 
+    new_t.n_step = 0;      // Reset integral; Por qué no funciona new_t->n_step ???
+    new_t.sum = 0.0;
+    
+    /* Modify integration limits for x = 1/t */
+    new_t.x_left = 0.0;          /* t at infinity = 0 */
+    new_t.x_right = 1.0 / (*original).x_left;     /* t at lower bound = 1/a */
+    
+    /* Assign function pointer and substitution kernel */
+    new_t.integrand =  (*original).integrand;     ;
+    new_t.kernel = kernel_midinf;
 
-    h[0] = 1.0; 
-    for(j=1; j <= JMAX; j++){
-        midpoint( &(*t) );      // Performing 1 level of integration in the grid
-        s[j-1] = t-> sum; 
-        if( j >= K ){           // Forcing at leat K integrations
-            polint( &h[j-K], &s[j-K], K, 0.0, &ss, &dss); // Interpolation
-            if (fabs(dss) <= TOL * fabs(ss)){
-                t -> sum = ss;
-                return;
-            }
-        }
-        h[j] = h[j-1] /9.0 ;
-        }
-    printf("Too many steps in routine simpson_tol");
+    midpoint_tol( &new_t ); // Actual integration
+
+    printf("--- Execution Results ---\n");
+    printf("Transformed Integration Result : %.6f\n", new_t.sum);
+    printf("Transformed Local Bounds       : t_left = %.2f, t_right = %.2f\n\n", new_t.x_left, new_t.x_right);
+
+    return new_t.sum;
+}
+
+float integrate_infinite_lower(const struct integrate *original) {
+    struct integrate new_t = *original;
+
+    new_t.n_step = 0;      
+    new_t.sum = 0.0;
+    
+    /* Modify integration limits for x = 1/t */
+    new_t.x_right = 0.0;          /* t at -infinity = 0 */
+    new_t.x_left = 1.0 / (*original).x_right;     /* t at lower bound = 1/a */
+    
+    /* Assign function pointer and substitution kernel */
+    new_t.integrand =  (*original).integrand;     ;
+    new_t.kernel = kernel_midinf;
+
+    midpoint_tol( &new_t ); // Actual integration
+
+    printf("--- Execution Results ---\n");
+    printf("Transformed Integration Result : %.6f\n", new_t.sum);
+    printf("Transformed Local Bounds       : t_left = %.2f, t_right = %.2f\n\n", new_t.x_left, new_t.x_right);
+
+    return new_t.sum;
+}
+
+float integrate_infinite_both(const struct integrate *original) {
+    struct integrate new_t = *original;
+
+    new_t.n_step = 0;      
+    new_t.sum = 0.0;
+    
+    /* Modify integration limits for x = 1/t */
+    new_t.x_right = 1.0 / (*original).x_left;          /* t at -infinity = 0 */
+    new_t.x_left = 1.0 / (*original).x_right;     /* t at lower bound = 1/a */
+    
+    /* Assign function pointer and substitution kernel */
+    new_t.integrand =  (*original).integrand;     ;
+    new_t.kernel = kernel_midinf;
+
+    midpoint_tol( &new_t ); // Actual integration
+
+    printf("--- Execution Results ---\n");
+    printf("Transformed Integration Result : %.6f\n", new_t.sum);
+    printf("Transformed Local Bounds       : t_left = %.2f, t_right = %.2f\n\n", new_t.x_left, new_t.x_right);
+
+    return new_t.sum;
+}
+
+
+// Sqrt singularities Eca. 4.4.5 y 4.4.6
+/* Struct to hold kernel-specific parameters */
+typedef struct {
+    float a;           /* singularity boundary */
+    void *user_params; /* Outer user parameters for f(x) if any */
+} SingularParams;
+
+/* Substitution kernel for lower square-root singularity */
+float kernel_sql(float t, IntegrandFunc func, void *user_data) {
+    SingularParams *p = (SingularParams *)user_data;
+    float x = p->a + (t * t);
+    /* Returns 2 * t * f(a + t^2) */
+    return 2.0f * t * func(x, p->user_params);
+}
+float kernel_squ(float t, IntegrandFunc func, void *user_data) {
+    SingularParams *p = (SingularParams *)user_data;
+    float x = p->a - (t * t);
+    /* Returns 2 * t * f(a + t^2) */
+    return 2.0f * t * func(x, p->user_params);
+}
+
+float integrate_sql(const struct integrate *original) {
+    struct integrate new_t = *original;
+
+    new_t.n_step = 0;      // Reset integral; Por qué no funciona new_t->n_step ???
+    new_t.sum = 0.0;
+    
+    /* Modify integration limits for x = 1/t */
+    new_t.x_left = 0.0;          /* t at infinity = 0 */
+    new_t.x_right = sqrtf((*original).x_right - (*original).x_left);    
+    new_t.integrand =  (*original).integrand;     
+    
+    /* Falaa un if para seleccionar a < b o al reves */
+    SingularParams kernel_params = {
+        .a = (float)original->x_left,
+        .user_params = original->user_data
+    };
+    new_t.kernel = kernel_sql;
+
+
+
+    
+
+    midpoint_tol( &new_t ); // Actual integration
+
+    printf("--- Execution Results ---\n");
+    printf("Transformed Integration Result : %.6f\n", new_t.sum);
+    printf("Transformed Local Bounds       : t_left = %.2f, t_right = %.2f\n\n", new_t.x_left, new_t.x_right);
+
+    return new_t.sum;
+}
+
+float integrate_infinite_lower(const struct integrate *original) {
+    struct integrate new_t = *original;
+
+    new_t.n_step = 0;      
+    new_t.sum = 0.0;
+    
+    /* Modify integration limits for x = 1/t */
+    new_t.x_right = 0.0;          /* t at -infinity = 0 */
+    new_t.x_left = 1.0 / (*original).x_right;     /* t at lower bound = 1/a */
+    
+    /* Assign function pointer and substitution kernel */
+    new_t.integrand =  (*original).integrand;     ;
+    new_t.kernel = kernel_midinf;
+
+    midpoint_tol( &new_t ); // Actual integration
+
+    printf("--- Execution Results ---\n");
+    printf("Transformed Integration Result : %.6f\n", new_t.sum);
+    printf("Transformed Local Bounds       : t_left = %.2f, t_right = %.2f\n\n", new_t.x_left, new_t.x_right);
+
+    return new_t.sum;
 }
 
 
 
+int main(){
+    struct  integrate t = {
+        .n_step = 0,
+        .x_left = 5.0,        // Lower bound a = 1.0 
+        .x_right = 1e30,      // Abstract representation of upper bound 
+        .sum = 0.0,
+        .integrand = f,
+        .kernel = NULL
+    };
+
+    float result; 
+
+    printf("--- Before Integ ration ---\n");
+    printf("Original Bounds : x_left = %.2f, x_right = %.2e\n", t.x_left, t.x_right);
+    printf("Original Steps  : %d\n\n", t.n_step);
+
+    result = integrate_infinite_upper(&t);
+
+    t.x_right = -5.0;
+    result += integrate_infinite_lower(&t);
+
+
+    /*printf("--- After Integration (Original Preserved) ---\n");
+    printf("Original Bounds : x_left = %.2f, x_right = %.2e\n", t.x_left, t.x_right);
+    printf("Original Steps  : %d\n", t.n_step);*/
+    return 0;
+}
+
+
+
+/*
 int main(){
     int i;   // Iterative variable
 
@@ -244,3 +325,4 @@ int main(){
     
     return 0;
 }
+*/
